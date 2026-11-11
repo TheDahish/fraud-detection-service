@@ -1,0 +1,79 @@
+spring:
+  application:
+    name: fraud-detection-service
+
+  datasource:
+    # H2 in PostgreSQL mode for this exercise. Production would point at PostgreSQL with the same migrations.
+    url: jdbc:h2:mem:fraud;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DATABASE_TO_LOWER=TRUE
+    username: sa
+    password: ""
+    hikari:
+      connection-timeout: 1000      # fail fast when the pool is exhausted, rather than queueing requests
+      maximum-pool-size: 20
+
+  jpa:
+    open-in-view: false             # no lazy loading in the web layer
+    hibernate:
+      ddl-auto: validate            # Flyway owns the schema; Hibernate only checks it matches
+    properties:
+      jakarta.persistence.query.timeout: 2000   # bound every query so a slow DB cannot hold threads
+
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true   # reject unexpected fields (e.g. a PAN sent under another key)
+
+  flyway:
+    enabled: true
+
+server:
+  port: 8080
+  shutdown: graceful
+  max-http-request-header-size: 8KB
+  error:
+    include-message: never
+    include-binding-errors: never
+    include-stacktrace: never
+    include-exception: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+
+logging:
+  level:
+    # Hibernate logs bound parameters at TRACE. Pin these so parameter values never reach the logs.
+    org.hibernate.orm.jdbc.bind: WARN
+    org.hibernate.SQL: WARN
+
+fraud:
+  security:
+    jwt:
+      # Required. Supplied via environment; the application will not start without them.
+      jwk-set-uri: ${FRAUD_JWKS_URI}
+      issuer: ${FRAUD_JWT_ISSUER}
+      audience: ${FRAUD_JWT_AUDIENCE:fraud-detection-service}
+    # Required. Base64 of at least 32 random bytes. Supplied via the secret store.
+    card-token-key: ${FRAUD_CARD_TOKEN_KEY}
+
+  risk:
+    amount-base-limits:
+      EUR: 10000.00
+      USD: 10000.00
+      EGP: 500000.00
+    hard-ceiling-multiplier: 5          # above 5x the base limit: critical rejection
+    velocity-window: PT60S
+    velocity-window-max-attempts: 10    # attempts per window before the window rule starts scoring
+    velocity-base-allowed-attempts: 10  # threat-adjusted allowance for the threat-vs-velocity rule
+    reject-threshold: 70
+    weights:
+      amount-vs-threat-score: 0.4
+      unknown-terminal: 0.8             # an unregistered terminal alone (0.8 x 100 = 80) rejects
+      terminal-velocity-window: 0.4      # two velocity rules at 0.4 each can reject a sustained burst on their own (max 80)
+      terminal-velocity-vs-threat: 0.4

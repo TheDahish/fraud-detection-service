@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+    <!--
+        Every log line passes through these converters. Masking is applied at the layout level, so a new
+        logger, appender, or call site cannot bypass it. %msg and %ex are replaced; %m is aliased in case
+        a pattern uses it.
+    -->
+    <conversionRule conversionWord="msg" converterClass="com.example.frauddetectionservice.infrastructure.logging.MaskingMessageConverter"/>
+    <conversionRule conversionWord="m" converterClass="com.example.frauddetectionservice.infrastructure.logging.MaskingMessageConverter"/>
+    <conversionRule conversionWord="ex" converterClass="com.example.frauddetectionservice.infrastructure.logging.MaskingThrowableConverter"/>
+    <conversionRule conversionWord="throwable" converterClass="com.example.frauddetectionservice.infrastructure.logging.MaskingThrowableConverter"/>
+
+    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <!-- %ex is included explicitly so Logback does not append an unmasked stack trace on its own. -->
+            <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{requestId:-none}] %logger{36} - %msg%ex%n</pattern>
+            <charset>UTF-8</charset>
+        </encoder>
+    </appender>
+
+    <root level="INFO">
+        <appender-ref ref="CONSOLE"/>
+    </root>
+</configuration>

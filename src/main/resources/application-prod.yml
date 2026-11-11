@@ -1,0 +1,14 @@
+# Production transport security. Requires a keystore and truststore supplied through the environment.
+server:
+  ssl:
+    enabled: true
+    key-store: ${FRAUD_TLS_KEYSTORE}
+    key-store-password: ${FRAUD_TLS_KEYSTORE_PASSWORD}
+    key-store-type: PKCS12
+    trust-store: ${FRAUD_TLS_TRUSTSTORE}
+    trust-store-password: ${FRAUD_TLS_TRUSTSTORE_PASSWORD}
+    trust-store-type: PKCS12
+    enabled-protocols: TLSv1.3,TLSv1.2
+    client-auth: need                  # mutual TLS: callers must present a certificate from our trust store
+  http2:
+    enabled: true
