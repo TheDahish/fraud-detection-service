@@ -34,3 +34,6 @@ build/
 
 # Company case brief: not for the public repository
 Softpay*.pdf
+
+# Local secrets for docker compose
+.env

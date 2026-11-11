@@ -1,0 +1,17 @@
+# Build output and IDE state are regenerated inside the image build.
+target/
+.idea/
+*.iml
+
+# Version control and local tooling
+.git/
+.gitignore
+
+# Never ship secrets, env files or the company brief
+.env
+*.env
+Softpay*.pdf
+
+# Design notes are not needed at runtime
+DESIGN_PLAN.md
+docs/
