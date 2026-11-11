@@ -1,0 +1,201 @@
+openapi: 3.1.0
+info:
+  title: Softpay Fraud Detection API
+  version: 1.0.0
+  description: |
+    Real-time fraud assessment for in-flight card transactions.
+    Returns whether the transaction is rejected, a fraud score (0-100), and the rules that contributed to it.
+    Card numbers are accepted over TLS and are never returned or logged.
+
+servers:
+  - url: /
+
+tags:
+  - name: FraudAssessment
+    description: Assess a single in-flight transaction
+
+paths:
+  /api/v1/fraud/assessments:
+    post:
+      tags: [FraudAssessment]
+      operationId: assessTransaction
+      summary: Assess an in-flight transaction
+      security:
+        - bearerAuth: [fraud:assess]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FraudAssessmentRequest'
+      responses:
+        '200':
+          description: Assessment completed. Check `rejected` to decide whether to allow the transaction.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FraudAssessmentResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/UnprocessableEntity'
+        '503':
+          $ref: '#/components/responses/ServiceUnavailable'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OAuth2 access token issued by the trusted identity provider. Requires scope `fraud:assess`.
+
+  responses:
+    BadRequest:
+      description: The request is malformed or fails validation.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+    Unauthorized:
+      description: Missing or invalid bearer token.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+    Forbidden:
+      description: Token is valid but lacks the required scope.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+    UnprocessableEntity:
+      description: The request is well-formed but references an unsupported currency.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+    ServiceUnavailable:
+      description: A dependency is unavailable. The transaction was not assessed; the caller decides how to proceed.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+    InternalError:
+      description: Unexpected error. Details are withheld; use `requestId` to correlate with logs.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
+
+  schemas:
+    FraudAssessmentRequest:
+      type: object
+      additionalProperties: false
+      required: [amount, currency, terminalId, terminalThreatScore, cardNumber]
+      properties:
+        amount:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1000000000
+          description: Transaction amount in major units of `currency`.
+          example: 1250.00
+        currency:
+          type: string
+          pattern: '^[A-Z]{3}$'
+          description: ISO 4217 alpha-3 currency code.
+          example: EUR
+        terminalId:
+          type: string
+          pattern: '^[A-Za-z0-9-]{1,32}$'
+          description: Identifier of the payment terminal.
+          example: T-1001
+        terminalThreatScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Threat score of the terminal supplied by the upstream threat intelligence feed (0 = safe, 100 = maximum threat).
+          example: 35
+        cardNumber:
+          type: string
+          writeOnly: true
+          pattern: '^[0-9]{12,19}$'
+          description: Primary account number. Must pass the Luhn check. Never returned or logged.
+          example: '4111111111111111'
+
+    FraudAssessmentResponse:
+      type: object
+      additionalProperties: false
+      required: [rejected, fraudScore, triggeredRules]
+      properties:
+        rejected:
+          type: boolean
+          description: True if the transaction must be blocked.
+        rejectionMessage:
+          type: ["string", "null"]
+          description: Human-readable reason when `rejected` is true. Null otherwise.
+        fraudScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Weighted, capped fraud score. A critical rule forces 100.
+        triggeredRules:
+          type: array
+          description: Rules that contributed to the score, in evaluation order.
+          items:
+            $ref: '#/components/schemas/TriggeredRule'
+
+    TriggeredRule:
+      type: object
+      additionalProperties: false
+      required: [code, weightedContribution, reason]
+      properties:
+        code:
+          type: string
+          enum:
+            - AMOUNT_VS_THREAT_SCORE
+            - UNKNOWN_TERMINAL
+            - TERMINAL_VELOCITY_WINDOW
+            - TERMINAL_VELOCITY_VS_THREAT
+        weightedContribution:
+          type: number
+          minimum: 0
+          description: Rule contribution multiplied by the configured rule weight. Critical rules report 100 (unweighted).
+        reason:
+          type: string
+          description: Fixed, non-sensitive explanation for the rule outcome.
+
+    ApiProblem:
+      description: RFC 9457 problem details.
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        requestId:
+          type: string
+          description: Correlation ID for support and log lookup.
+        errors:
+          type: array
+          description: Field-level validation errors. Rejected values are never echoed.
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+
+  # Note: the bearer scheme does not declare scopes; scope enforcement happens on the server (see SecurityConfig).
