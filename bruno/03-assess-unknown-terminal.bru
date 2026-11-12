@@ -1,0 +1,37 @@
+meta {
+  name: Assess - unregistered terminal is rejected
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{baseUrl}}/api/v1/fraud/assessments
+  body: json
+  auth: bearer
+}
+
+headers {
+  X-Request-Id: bruno-unknown-0001
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "amount": 25.00,
+    "currency": "EUR",
+    "terminalId": "T-0000",
+    "terminalThreatScore": 0,
+    "cardNumber": "4111111111111111"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.rejected: eq true
+  res.body.fraudScore: eq 80
+  res.body.triggeredRules[0].code: eq UNKNOWN_TERMINAL
+  res.body.triggeredRules[0].weightedContribution: eq 80
+}

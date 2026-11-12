@@ -1,0 +1,36 @@
+meta {
+  name: Assess - blocked terminal is rejected critically
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/api/v1/fraud/assessments
+  body: json
+  auth: bearer
+}
+
+headers {
+  X-Request-Id: bruno-blocked-0001
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "amount": 25.00,
+    "currency": "EUR",
+    "terminalId": "T-9999",
+    "terminalThreatScore": 0,
+    "cardNumber": "4111111111111111"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.rejected: eq true
+  res.body.fraudScore: eq 100
+  res.body.rejectionMessage: eq Transaction rejected: Terminal is blocked
+}

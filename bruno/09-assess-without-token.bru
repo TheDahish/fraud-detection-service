@@ -1,0 +1,29 @@
+meta {
+  name: Assess - no token returns 401
+  type: http
+  seq: 9
+}
+
+post {
+  url: {{baseUrl}}/api/v1/fraud/assessments
+  body: json
+  auth: none
+}
+
+headers {
+  X-Request-Id: bruno-notoken-0001
+}
+
+body:json {
+  {
+    "amount": 25.00,
+    "currency": "EUR",
+    "terminalId": "T-1001",
+    "terminalThreatScore": 0,
+    "cardNumber": "4111111111111111"
+  }
+}
+
+assert {
+  res.status: eq 401
+}

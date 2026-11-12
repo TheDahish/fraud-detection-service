@@ -1,0 +1,36 @@
+meta {
+  name: Assess - amount above hard ceiling is rejected critically
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{baseUrl}}/api/v1/fraud/assessments
+  body: json
+  auth: bearer
+}
+
+headers {
+  X-Request-Id: bruno-ceiling-0001
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "amount": 60000.00,
+    "currency": "EUR",
+    "terminalId": "T-1002",
+    "terminalThreatScore": 0,
+    "cardNumber": "4111111111111111"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.rejected: eq true
+  res.body.fraudScore: eq 100
+  res.body.triggeredRules[0].code: eq AMOUNT_VS_THREAT_SCORE
+}

@@ -1,0 +1,33 @@
+meta {
+  name: Assess - valid token without fraud:assess returns 403
+  type: http
+  seq: 10
+}
+
+post {
+  url: {{baseUrl}}/api/v1/fraud/assessments
+  body: json
+  auth: bearer
+}
+
+headers {
+  X-Request-Id: bruno-wrongscope-0001
+}
+
+auth:bearer {
+  token: {{otherScopeToken}}
+}
+
+body:json {
+  {
+    "amount": 25.00,
+    "currency": "EUR",
+    "terminalId": "T-1001",
+    "terminalThreatScore": 0,
+    "cardNumber": "4111111111111111"
+  }
+}
+
+assert {
+  res.status: eq 403
+}

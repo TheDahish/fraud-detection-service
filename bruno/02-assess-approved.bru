@@ -1,0 +1,36 @@
+meta {
+  name: Assess - ordinary payment is approved
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/api/v1/fraud/assessments
+  body: json
+  auth: bearer
+}
+
+headers {
+  X-Request-Id: bruno-approved-0001
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "amount": 25.00,
+    "currency": "EUR",
+    "terminalId": "T-1001",
+    "terminalThreatScore": 0,
+    "cardNumber": "4111111111111111"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.rejected: eq false
+  res.body.fraudScore: eq 0
+  res.body.rejectionMessage: isNull
+}

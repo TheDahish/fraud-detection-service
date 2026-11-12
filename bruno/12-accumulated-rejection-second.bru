@@ -1,0 +1,39 @@
+meta {
+  name: Accumulated rejection (2 of 2) - second attempt is rejected by two rules together
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{baseUrl}}/api/v1/fraud/assessments
+  body: json
+  auth: bearer
+}
+
+headers {
+  X-Request-Id: bruno-accumulate-0002
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "amount": 10.00,
+    "currency": "EUR",
+    "terminalId": "T-1002",
+    "terminalThreatScore": 100,
+    "cardNumber": "4111111111111111"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.rejected: eq true
+  res.body.fraudScore: gte 70
+  res.body.triggeredRules.length: gte 2
+  res.body.triggeredRules[0].code: eq AMOUNT_VS_THREAT_SCORE
+  res.body.triggeredRules[1].code: eq TERMINAL_VELOCITY_VS_THREAT
+  res.body.rejectionMessage: eq Transaction rejected for multiple causes; see triggeredRules
+}

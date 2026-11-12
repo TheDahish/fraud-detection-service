@@ -41,34 +41,41 @@ Card and geo-location rules are out of scope for this version.
 
 Requirements: Java 25 (or Docker).
 
-Set the three required secrets. They're read from the environment and the service won't start without them:
+No environment variables or external services are needed. Token verification is mocked: the service accepts two fixed bearer tokens and rejects everything else.
+
+- `mock-token-fraud-assess` carries the `fraud:assess` scope.
+- `mock-token-reports-read` carries `reports:read`, a valid token without the payment scope.
+
+Run it either way:
 
 ```bash
-export FRAUD_JWKS_URI=https://your-identity-provider/.well-known/jwks.json
-export FRAUD_JWT_ISSUER=https://your-identity-provider/
-export FRAUD_CARD_TOKEN_KEY=$(openssl rand -base64 32)
+docker compose up --build     # container, port 8070
+./mvnw spring-boot:run        # local, port 8070
 ```
 
-Then run it:
+Health checks are public:
 
 ```bash
-./mvnw spring-boot:run
+curl http://localhost:8070/actuator/health/liveness
+curl http://localhost:8070/actuator/health/readiness
 ```
 
-Or with Docker. Copy `.env.example` to `.env`, fill in the values, then:
-
-```bash
-docker compose up --build
-```
-
-The service listens on port 8080. Health checks are public:
-
-```bash
-curl http://localhost:8080/actuator/health/liveness
-curl http://localhost:8080/actuator/health/readiness
-```
+Logs go to a local Splunk instance through its HTTP Event Collector. The compose file uses Docker's `splunk` logging driver, so only the masked stdout lines leave the app. To use it, set `SPLUNK_HEC_TOKEN` in `.env` and have Splunk listen on `localhost:8088`. Without Splunk the service still runs, but its log lines are dropped and `docker logs` won't show them. The compose file trusts Splunk's self-signed certificate, so use it for local development only.
 
 A local database is seeded with three terminals: `T-1001` and `T-1002` are active, and `T-9999` is blocked.
+
+## API collection (Bruno)
+
+[`bruno/`](bruno) holds a Bruno collection with one request per purpose: liveness, an approved payment, each rejection path, and the error responses (422, 400, 401, 403). Each request has assertions.
+
+Start the service first (see above). Then, from the command line with the [Bruno CLI](https://docs.usebruno.com/bru-cli/overview):
+
+```bash
+cd bruno
+bru run --env local
+```
+
+Or in the Bruno app: select the `local` environment and run the collection. Its tokens are the two mock tokens above.
 
 ## Test
 
@@ -79,18 +86,19 @@ A local database is seeded with three terminals: `T-1001` and `T-1002` are activ
 - **Unit tests** cover each rule's boundaries, the engine's critical short-circuit, weighting and rounding, value objects and the log masker.
 - **Acceptance tests** ([src/test/.../acceptance](src/test/java/com/example/frauddetectionservice/acceptance)) drive the HTTP API through the security layer and check the business rules: approvals, declines, input validation, access control, and card-data protection.
 
-One test is disabled on purpose: retried requests must not be counted twice. It needs the idempotency feature, which isn't built yet.
+`./mvnw verify` runs 85 tests: 84 pass and 1 is disabled on purpose. The disabled test checks that retried requests are not counted twice, and it needs the idempotency feature, which isn't built yet.
 
 ## Security
 
-- Callers authenticate with OAuth2 bearer tokens. Tokens must be RS256, from the configured issuer, with the expected audience and the `fraud:assess` scope. Metrics need `ops:read`.
-- Card numbers are never stored or logged. The database holds a keyed HMAC-SHA256 token of the card number. Logs are masked before they're written.
+- Callers authenticate with OAuth2 bearer tokens and need the `fraud:assess` scope for the assessment endpoint. Token verification is mocked (see Run it), so signature, issuer and audience are not checked.
+- Card numbers are validated and then discarded. They are never stored, returned, or logged. Logs are masked before they're written.
 - Errors never echo input, and every error is a problem+json response with a request ID.
 - The container runs as a non-root user with a read-only filesystem and all Linux capabilities dropped.
 - Production TLS and mutual TLS are in `application-prod.yml`. They need a keystore and truststore, which aren't in this repo.
 
 ## Known gaps
 
+- **Token verification is mocked.** The service accepts two fixed tokens and checks no signature, issuer or audience. Real JWT validation (JWK set, issuer, audience) must replace the mock before any production use. The mock tokens are in the code, so the mock must not reach a production profile.
 - **Single node.** The database is in-process H2, so each instance has its own velocity history. Horizontal scaling needs a shared PostgreSQL, as described in the design doc.
 - **No idempotency.** A retried request is counted twice.
 - **Caller identity isn't recorded** in the audit trail.

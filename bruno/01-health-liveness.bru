@@ -1,0 +1,16 @@
+meta {
+  name: Health - liveness (public)
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{baseUrl}}/actuator/health/liveness
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq UP
+}

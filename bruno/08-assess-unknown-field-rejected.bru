@@ -1,0 +1,34 @@
+meta {
+  name: Assess - unexpected field is refused, not ignored
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/api/v1/fraud/assessments
+  body: json
+  auth: bearer
+}
+
+headers {
+  X-Request-Id: bruno-unknownfield-0001
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "amount": 25.00,
+    "currency": "EUR",
+    "terminalId": "T-1001",
+    "terminalThreatScore": 0,
+    "cardNumber": "4111111111111111",
+    "pan": "4111111111111111"
+  }
+}
+
+assert {
+  res.status: eq 400
+}

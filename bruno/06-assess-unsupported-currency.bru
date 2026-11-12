@@ -1,0 +1,34 @@
+meta {
+  name: Assess - unsupported currency returns 422
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/api/v1/fraud/assessments
+  body: json
+  auth: bearer
+}
+
+headers {
+  X-Request-Id: bruno-currency-0001
+}
+
+auth:bearer {
+  token: {{accessToken}}
+}
+
+body:json {
+  {
+    "amount": 1000,
+    "currency": "JPY",
+    "terminalId": "T-1001",
+    "terminalThreatScore": 0,
+    "cardNumber": "4111111111111111"
+  }
+}
+
+assert {
+  res.status: eq 422
+  res.body.title: eq Unsupported currency
+}

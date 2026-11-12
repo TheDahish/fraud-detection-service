@@ -7,20 +7,23 @@ Status: implemented, pending owner review. Companion to `DESIGN_PLAN.md`, which 
 - One real-time endpoint: `POST /api/v1/fraud/assessments`. Input: amount, currency, terminal ID, terminal threat score (0-100), card number. Output: rejection status, rejection message, fraud score (0-100), and the triggered rules.
 - Rules implemented: amount vs. threat score, unknown terminal, terminal velocity in a window, terminal velocity vs. threat score.
 - Out of scope by instruction: card usage frequency and card + geo-location. The listed inputs also contain no location data, so the geo rule cannot be computed from them.
-- No unit tests were written in this iteration, as requested. Verification is described in section 10.
+- Tests: 85 automated tests (unit and acceptance) run with `./mvnw verify`: 84 pass and 1 is disabled on purpose (idempotency, section 6). Verification against a running instance is described in section 10.
 
 ## 2. Architecture
 
-Hexagonal layout: the domain has no framework imports and the adapters are replaceable.
+A conventional Spring layout. Controllers call a service, the service uses the rule engine and Spring Data repositories, and the rules and model packages have no framework imports, so they can be tested with plain Java.
 
 ```
-api/             Controller (implements generated interface), mapper, RFC 9457 errors, request-ID and size filters
-generated/       Interfaces and DTOs generated from openapi/fraud-api.yaml (contract-first)
-application/     FraudAssessmentService (transaction boundary), ports, UnsupportedCurrencyException
-domain/          Transaction, CardNumber, Terminal, RiskContext, RuleOutcome, RiskEngine, Assessment
-domain/rules/    Four FraudRule strategies
-infrastructure/  JPA adapters, HMAC tokenizer, security config, log masking, metrics
-config/          Typed, validated risk properties; rule wiring; Clock
+api/          Controller (implements the generated interface), mapper, error handler, request-ID filter
+service/      FraudAssessmentService: the transaction boundary and the order of steps
+rules/        FraudRule and the four rules, RiskEngine, RuleOutcome, RiskContext
+model/        Transaction, Terminal, Assessment (plain records)
+entity/       TerminalEntity, AssessmentEntity (JPA)
+repository/   Spring Data repositories used directly by the service
+exception/    Validation and application exceptions
+config/       Validated risk settings, security, rule wiring, Clock
+util/         CardNumberValidator, log masking
+generated/    Interfaces and DTOs generated from openapi/fraud-api.yaml (contract-first)
 ```
 
 ### Patterns
@@ -28,10 +31,10 @@ config/          Typed, validated risk properties; rule wiring; Clock
 | Pattern | Where | Why |
 |---|---|---|
 | Strategy | `FraudRule` implementations | Rules are added or removed without changing the engine. |
-| Ports and adapters | `application/port`, `infrastructure/persistence` | The domain and service do not know about JPA. |
+| Repository | `repository/` (Spring Data) | The service talks to persistence through repository interfaces. The rules never touch the database. |
 | Sealed result type | `RuleOutcome` (Scored / Critical) | A rejection is a business outcome, not an exception. The compiler forces every outcome to be handled. |
 | Contract-first | OpenAPI to generated code | The contract is the source of truth, and drift between spec and code fails the build. |
-| Value object | `CardNumber`, `Transaction` | Validation happens at construction, and the card's `toString` is redacted by design. |
+| Validated values | `Transaction`, `CardNumberValidator` | Invalid input is rejected at construction. The card number is validated and then dropped, because no rule needs it. |
 | Dependency injection with a fixed Clock | `RiskConfiguration` | Time-based logic is deterministic and testable. |
 
 Rejected: Chain of Responsibility (it short-circuits and loses the score), exceptions for rejections (they hide an expected outcome behind error handling), and a shared mutable in-memory counter (it breaks as soon as there is more than one instance).
@@ -44,9 +47,11 @@ Two mechanisms combine.
 - A blocked terminal. Blocked terminals must never transact, so no weight should dilute this.
 - An amount above `baseLimit × hardCeilingMultiplier` (default 5×). This is an absolute ceiling.
 
-**Scored outcomes** each produce a contribution from 0 to 100. The engine computes `score = min(100, round(Σ weight × contribution))` and rejects when `score ≥ 70`.
+**Scored outcomes** each produce a contribution from 0 to 100. The engine computes `score = min(100, floor(Σ weight × contribution))` and rejects when `score ≥ 70`. It floors rather than rounds, so a sum of 69.6 is never shown as 70 while being allowed.
 
 Why weighted sum, capped: a max would ignore several weak signals that together indicate fraud, and the cap bounds the sum. Every triggered rule appears in the response, so the score is explainable.
+
+The rejection message follows the same rule. One triggered cause is named (`Transaction rejected: <reason>`). Several causes produce `Transaction rejected for multiple causes; see triggeredRules`, and the `triggeredRules` list gives the detail.
 
 Why weights are configurable: the right importance of each signal is a business decision that changes over time. Weights are validated to lie in 0.0 to 1.0 at startup.
 
@@ -67,7 +72,7 @@ Attempts include rejected ones. A burst of rejected attempts is itself a signal,
 
 - H2 in PostgreSQL mode, with Flyway migrations. Hibernate runs with `ddl-auto=validate`, so Flyway owns the schema and a mismatch fails at startup. This caught a real `CHAR` vs `VARCHAR` drift during the build.
 - `terminal`: the registry. The seed data includes one blocked terminal, `T-9999`, for demonstrations.
-- `fraud_assessment`: an append-only audit of each decision. It stores a keyed card token and never the PAN. The index `(terminal_id, assessed_at)` serves the velocity count as a range scan.
+- `fraud_assessment`: an append-only audit of each decision. It holds no card data. The index `(terminal_id, assessed_at)` serves the velocity count as a range scan.
 - The velocity query is `count(*) where terminal_id = ? and assessed_at >= ?`, bounded by a 2 s query timeout.
 
 ### Concurrency
@@ -83,29 +88,28 @@ Trade-off: the lock serializes throughput per terminal. A terminal is a single p
 ## 5. Security
 
 ### Data protection
-- **PAN never persisted.** The DB has no PAN column. Velocity and audit use an HMAC-SHA256 token keyed by a secret from the environment (at least 32 bytes, validated at startup). A plain hash would be brute-forceable offline because the PAN space is small, and the key is what makes the token safe.
-- **PAN never logged.** Three layers:
-  1. `CardNumber.toString()` returns `CardNumber[REDACTED]`. The raw value is reachable only through `unmaskedValue()`, which is named to signal intent.
-  2. Logback replaces `%msg` and `%ex` in `logback-spring.xml` with masking converters. Every line is masked, so a new logger or call site cannot bypass it.
-  3. `LogSanitizer` masks 13–19 digit runs (with optional separators) and key/value pairs for card, PAN, CVV, secret, password, token and authorization keys. It also escapes CR/LF in messages to prevent log forging.
+- **PAN never persisted.** The card number is checked for format and Luhn validity, then dropped. Nothing in the service stores, returns or forwards it, and the database has no card column. The brief does not require card history, and no rule uses it, so storing a derived value would add risk for no benefit.
+- **PAN never logged.** Two layers:
+  1. Logback replaces `%msg` and `%ex` in `logback-spring.xml` with masking converters. Every line is masked, so a new logger or call site cannot bypass it.
+  2. `LogSanitizer` masks 13–19 digit runs (with optional separators) and key/value pairs for card, PAN, CVV, secret, password, token and authorization keys. It also escapes CR/LF in messages to prevent log forging.
 - **Errors never echo input.** Validation errors return field names and fixed messages. Malformed-body errors do not include the parser's message, since parser messages can contain the input.
-- **Secrets are never printed.** `SecurityProperties.toString()` redacts the key. Secrets come from environment variables, and a missing one fails startup.
+- **Secrets are not in the code.** Local runs and tests need none. The production TLS keystore and truststore come from `FRAUD_TLS_*` environment variables.
 
 Verified: 0 card occurrences in logs across all runs. Sanitizer probe on sample inputs: PAN with spaces, PAN with a bad Luhn check digit, `cardNumber:` and `pan=` key/value forms, and a stack trace. Non-sensitive lines are unchanged.
 
 ### Authentication and authorization
-- OAuth2 bearer tokens, RS256, verified against the identity provider's JWK set. Validation covers signature, expiry, issuer, and audience. The audience check stops a token minted for another service from being replayed here.
-- Scope `fraud:assess` is required for the assessment endpoint. Metrics need `ops:read`, so monitoring access is separate from the payment-facing scope.
+- OAuth2 bearer tokens through Spring Security's resource-server flow. **Token verification is mocked.** The decoder accepts two fixed tokens, one per scope, and rejects everything else. It checks no signature, issuer or audience. This is a deliberate exercise shortcut. Real validation (RS256 against the identity provider's JWK set, plus issuer and audience checks) must replace it before any production use.
+- Scope `fraud:assess` is required for the assessment endpoint.
 - Secure by default: `anyRequest().denyAll()`. Only the liveness and readiness probes are public.
 - Stateless: no sessions, CSRF disabled. This is valid only because the API accepts bearer tokens, not cookies.
 
-Verified: no token gives 401; wrong audience gives 401; wrong scope gives 403; metrics with the payment scope give 403; metrics with `ops:read` give 200.
+Verified: no token gives 401; an unknown token gives 401; a valid token without the payment scope gives 403.
 
 ### Transport and hardening
 - Production profile: TLS 1.3 and 1.2 only, with mutual TLS (`client-auth: need`), so the caller must present a certificate from our trust store. This layers over the bearer token rather than replacing it.
 - Plaintext HTTP is used only for the local run in this exercise.
 - Request IDs: an incoming `X-Request-Id` is accepted only if it matches `[A-Za-z0-9-]{8,64}`. Anything else is replaced with a generated UUID. This prevents injected text in logs and spoofed IDs.
-- Body limit: 8 KB on declared `Content-Length`, rejected with 413 before parsing. Chunked bodies are not covered and must be limited at the gateway.
+- Request body size is not limited in the application. Limits belong at the gateway or load balancer, which also covers chunked bodies.
 - Unknown JSON fields are rejected with 400, so a PAN sent under another key is refused rather than silently ignored.
 - Error responses carry no stack traces or messages (`server.error.include-*: never`).
 - Security headers from Spring Security are on (`nosniff`, `X-Frame-Options`, no-store). HSTS applies over HTTPS.
@@ -124,27 +128,19 @@ Not implemented, documented for production: a circuit breaker (Resilience4j) aro
 
 - Key=value identifiers in every line: the request ID (MDC), terminal ID, decision, score and the triggered rule codes.
 - Never logged: amounts, card data, request bodies, or the raw SQL bind parameters (`org.hibernate.orm.jdbc.bind` is pinned to WARN).
-- Metrics (Micrometer, exposed via actuator behind `ops:read`):
-  - `fraud.assessments{decision=allow|reject}`: decision rate
-  - `fraud.score`: score distribution
-  - `fraud.rule.triggered{rule=…}`: which rules fire
-  - HTTP latency and error rates from Boot's built-in instrumentation
-- Tags use bounded enums only, so cardinality stays fixed.
-- Alerting (not configured in code): reject-rate spike, 5xx or 503 rate, p99 latency, lock-timeout count.
+- Actuator exposes only `health`. There are no business metrics. Adding decision-rate or rule-trigger metrics is a reasonable next step once someone needs dashboards.
+- Alerting (not configured in code): 5xx or 503 rate, p99 latency, lock-timeout count.
 
 ## 8. Configuration
 
 Thresholds, limits, windows and weights live in `application.yml`, validated at startup. Changing them is a configuration change. Production should version them and audit changes.
 
-Required environment variables (startup fails without them):
+No environment variables are required. Local runs and tests use the mock token decoder. The production TLS settings in `application-prod.yml` take their values from `FRAUD_TLS_*` variables:
 
 | Variable | Purpose |
 |---|---|
-| `FRAUD_JWKS_URI` | Identity provider JWK set URL |
-| `FRAUD_JWT_ISSUER` | Expected token issuer |
-| `FRAUD_JWT_AUDIENCE` | Expected audience (defaults to `fraud-detection-service`) |
-| `FRAUD_CARD_TOKEN_KEY` | Base64 HMAC key, at least 32 bytes |
-| `FRAUD_TLS_*` | Keystore and truststore, production profile only |
+| `FRAUD_TLS_KEYSTORE`, `FRAUD_TLS_KEYSTORE_PASSWORD` | Server keystore, production profile only |
+| `FRAUD_TLS_TRUSTSTORE`, `FRAUD_TLS_TRUSTSTORE_PASSWORD` | Client truststore for mutual TLS, production profile only |
 
 ## 9. Framework choices
 
@@ -153,12 +149,12 @@ Required environment variables (startup fails without them):
 - **Spring Data JPA with Flyway**: a standard, auditable way to version the schema.
 - **H2 in PostgreSQL mode**: runs in-process for the exercise. Production would use PostgreSQL with the same migrations.
 - **OpenAPI generator (contract-first)**: keeps the HTTP contract in one reviewable file, and the generated interfaces enforce it at compile time.
-- **Spring Security OAuth2 Resource Server**: a maintained, standard implementation rather than custom token handling.
+- **Spring Security OAuth2 Resource Server**: the standard bearer-token flow for scopes and 401/403 handling. Its token decoder is mocked in this build (section 5).
 - **Logback with a custom converter**: masking at the layout level, below the application code.
 
 ## 10. Verification performed
 
-Done against a running instance with a locally generated RSA key and JWK set (no unit tests, as requested):
+Done against a running instance, with the mock token decoder (section 5). The automated suite is listed at the end of this section.
 
 | Check | Result |
 |---|---|
@@ -175,18 +171,19 @@ Done against a running instance with a locally generated RSA key and JWK set (no
 | Invalid Luhn | 400, card not echoed |
 | Unknown JSON field (`pan`) | 400 |
 | Malformed JSON | 400, no parser message |
-| Missing token, wrong audience, wrong scope | 401, 401, 403 |
-| Metrics scope | 403 with payment scope, 200 with ops scope |
-| Oversized body | 413 |
+| No token, unknown token, valid token without the payment scope | 401, 401, 403 |
 | Request ID with invalid characters | Replaced with a generated ID |
 | PAN in application logs (post-restart run) | 0 occurrences |
 | Log sanitizer probe | All sensitive inputs masked, normal text unchanged |
 | Schema validation at startup | Passes (after one real `CHAR`/`VARCHAR` fix) |
 
+Automated suite: `./mvnw verify` runs 85 tests with 0 failures and 1 skipped (the idempotency test, disabled on purpose). It covers each rule's boundaries, the engine's critical short-circuit and weighting, value validation, the log masker, the service's locking order and failure behaviour, and the HTTP acceptance tests (decisions, input rules, access control, card-data protection).
+
 Not verified in this iteration:
 - The 503 path under a real database outage (mapping is in place, not exercised).
 - Production TLS and mutual TLS (profile written, no certificates provisioned).
-- Chunked request bodies (intentionally gateway-enforced).
+- Request body size limits (none in the application, see section 5).
+- Real token validation (mocked, see section 5).
 
 ## 11. Open decisions for the owner
 
@@ -196,7 +193,7 @@ Not verified in this iteration:
 4. **Currency:** per-currency limits (current) or FX conversion to a base currency?
 5. **Weights and thresholds:** the current values (0.4 / 0.8 / 0.4 / 0.4, reject at 70) are defensible but untuned. They need calibration against real data.
 6. **Velocity counts rejected attempts:** currently yes, by design.
-7. **Stretch rule:** card-usage frequency. The `card_token` column is in place, so it needs only an index and a rule.
+7. **Stretch rule:** card-usage frequency. This needs a way to group attempts by card without storing the PAN, which is an open decision. Options are a keyed token (which needs a key managed as a secret) or a PCI-approved tokenization service.
 
 ## 12. Review findings and disposition
 
@@ -216,14 +213,15 @@ An independent review was run against the code. Each finding was checked and han
 - *Idempotency (High).* A lost response followed by a retry double-counts velocity. The planned fix is an `Idempotency-Key` header with a unique constraint on (terminal, key).
 - *Unregistered terminals take no lock (Medium).* The unknown-terminal weight (0.8) rejects alone, so the race has no effect today. It would matter if that weight were lowered below 0.7. The fix is an advisory lock keyed on the terminal ID.
 - *Generated DTO `toString` prints the PAN (Medium).* The application never logs request DTOs, and the masking layer would catch a PAN in a logged string. The generator template should be customised so the DTO cannot print it.
-- *401 and 403 bodies are empty, not problem+json (Medium).* Custom Spring Security entry points are needed. The 413 response is also undeclared in the contract.
+- *401 and 403 bodies are empty, not problem+json (Medium).* Custom Spring Security entry points are needed.
 - *No caller identity in the audit (Medium).* The JWT `sub` should be recorded per assessment.
 - *Rejected attempts can be used to flood a terminal (Medium).* Any holder of `fraud:assess` can exhaust a terminal's velocity budget. The mitigations are a per-caller limit, or counting only allowed attempts.
 - *Unbounded audit growth (Medium).* No retention job and no check that the terminal exists in the registry.
-- *Chunked request bodies are unbounded (Medium).* The filter checks only the declared Content-Length. The gateway must enforce the limit.
+- *Request bodies are unbounded in the application (Medium).* No size limit is enforced here. The gateway or load balancer must enforce one.
 - *TLS depends on the `prod` profile (Low).* Without it the app serves plain HTTP.
+- *Token verification is mocked (High for production).* The decoder accepts two fixed tokens and checks no signature, issuer or audience. Replacing it with JWK-set validation is required before any real deployment. The mock tokens are in the code, so the mock must not reach a production profile.
 - *Log masking edge cases (Low).* PAN runs longer than 19 digits are not masked, and control characters other than CR/LF are not escaped.
 
 **Not changed, by choice**
-- The review suggested cutting some ports and the entity workaround. I kept them: they keep the domain testable, and they show the boundary design the brief asks about.
-- Unit tests remain unwritten, as requested. The review's list of tests to add (rule boundaries, the per-terminal lock, problem+json bodies) is the next step once you approve the design.
+- The review suggested cutting some ports and the entity workaround. Both were removed later, when the project moved to the conventional layout in section 2.
+- Tests were written after this review, at the owner's request. The suite is described in section 10. Two items from the review's test list are still missing: a direct test of the per-terminal lock under concurrency, and assertions on problem+json bodies for 401 and 403.
