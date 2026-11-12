@@ -1,15 +1,10 @@
-# Local run: `cp .env.example .env`, fill in the values, then `docker compose up --build`.
+# Local run: `docker compose up --build`. Values come from .env (see .env.example).
 services:
   fraud-detection-service:
     build: .
     image: fraud-detection-service:local
     ports:
-      - "8080:8080"
-    environment:
-      FRAUD_JWKS_URI: ${FRAUD_JWKS_URI:?set FRAUD_JWKS_URI in .env}
-      FRAUD_JWT_ISSUER: ${FRAUD_JWT_ISSUER:?set FRAUD_JWT_ISSUER in .env}
-      FRAUD_JWT_AUDIENCE: ${FRAUD_JWT_AUDIENCE:-fraud-detection-service}
-      FRAUD_CARD_TOKEN_KEY: ${FRAUD_CARD_TOKEN_KEY:?set FRAUD_CARD_TOKEN_KEY in .env}
+      - "8070:8070"
     read_only: true
     tmpfs:
       - /tmp
@@ -22,3 +17,19 @@ services:
         limits:
           memory: 768m
     restart: unless-stopped
+    # Ships stdout (already masked by the app) to a local Splunk HEC endpoint.
+    # Non-blocking, so a Splunk outage drops log lines instead of stalling requests.
+    # Note: `docker logs` is not available while this driver is set.
+    logging:
+      driver: splunk
+      options:
+        # host.docker.internal reaches the host from inside Docker Desktop.
+        splunk-url: ${SPLUNK_HEC_URL:-https://host.docker.internal:8088}
+        splunk-token: ${SPLUNK_HEC_TOKEN:-}
+        splunk-verify-connection: "false"
+        # Local Splunk uses a self-signed certificate. Development only.
+        splunk-insecureskipverify: "true"
+        splunk-format: raw
+        splunk-sourcetype: fraud-detection-service
+        mode: non-blocking
+        max-buffer-size: 4m

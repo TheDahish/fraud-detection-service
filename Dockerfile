@@ -20,7 +20,7 @@ RUN groupadd --system --gid 10001 app && useradd --system --uid 10001 --gid app 
 WORKDIR /app
 COPY --from=build /workspace/app.jar /app/app.jar
 USER app
-EXPOSE 8080
+EXPOSE 8070
 
 # Container-aware heap sizing; the container memory limit, not the host, sets the ceiling.
 ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "/app/app.jar"]
