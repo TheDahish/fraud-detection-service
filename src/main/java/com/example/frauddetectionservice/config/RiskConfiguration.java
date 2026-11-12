@@ -1,12 +1,12 @@
 package com.example.frauddetectionservice.config;
 
-import com.example.frauddetectionservice.domain.FraudRule;
-import com.example.frauddetectionservice.domain.RiskEngine;
-import com.example.frauddetectionservice.domain.RuleCode;
-import com.example.frauddetectionservice.domain.rules.AmountVsThreatScoreRule;
-import com.example.frauddetectionservice.domain.rules.TerminalVelocityVsThreatRule;
-import com.example.frauddetectionservice.domain.rules.TerminalVelocityWindowRule;
-import com.example.frauddetectionservice.domain.rules.UnknownTerminalRule;
+import com.example.frauddetectionservice.rules.AmountVsThreatScoreRule;
+import com.example.frauddetectionservice.rules.FraudRule;
+import com.example.frauddetectionservice.rules.RiskEngine;
+import com.example.frauddetectionservice.rules.RuleCode;
+import com.example.frauddetectionservice.rules.TerminalVelocityVsThreatRule;
+import com.example.frauddetectionservice.rules.TerminalVelocityWindowRule;
+import com.example.frauddetectionservice.rules.UnknownTerminalRule;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;

@@ -4,12 +4,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.http.MediaType.APPLICATION_JSON;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-import static org.springframework.http.MediaType.APPLICATION_JSON;
 
 /** Who may call the payment service, who may read its operational data, and how callers can trace a request. */
 class AccessAndOperationsAcceptanceTest extends PaymentAcceptanceTestBase {
@@ -25,7 +25,7 @@ class AccessAndOperationsAcceptanceTest extends PaymentAcceptanceTestBase {
     @Test
     @DisplayName("A valid token without the payment scope cannot assess payments")
     void requiresPaymentScope() throws Exception {
-        mvc.perform(post(ENDPOINT).with(jwt().authorities(OPS_SCOPE))
+        mvc.perform(post(ENDPOINT).with(jwt().authorities(OTHER_SCOPE))
                         .contentType(APPLICATION_JSON)
                         .content(payment(activeTerminal(), "10.00", 0)))
                 .andExpect(status().isForbidden());
@@ -35,16 +35,6 @@ class AccessAndOperationsAcceptanceTest extends PaymentAcceptanceTestBase {
     @DisplayName("Load balancers can probe liveness without credentials")
     void livenessIsPublic() throws Exception {
         mvc.perform(get("/actuator/health/liveness")).andExpect(status().isOk());
-    }
-
-    @Test
-    @DisplayName("Operational metrics are readable only by operations staff, not by payment callers")
-    void metricsRequireOperationsScope() throws Exception {
-        mvc.perform(get("/actuator/metrics")).andExpect(status().isUnauthorized());
-        mvc.perform(get("/actuator/metrics").with(jwt().authorities(ASSESS_SCOPE)))
-                .andExpect(status().isForbidden());
-        mvc.perform(get("/actuator/metrics").with(jwt().authorities(OPS_SCOPE)))
-                .andExpect(status().isOk());
     }
 
     @Test

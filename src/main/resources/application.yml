@@ -26,7 +26,7 @@ spring:
     enabled: true
 
 server:
-  port: 8080
+  port: 8070
   shutdown: graceful
   max-http-request-header-size: 8KB
   error:
@@ -39,7 +39,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        include: health
   endpoint:
     health:
       probes:
@@ -53,15 +53,6 @@ logging:
     org.hibernate.SQL: WARN
 
 fraud:
-  security:
-    jwt:
-      # Required. Supplied via environment; the application will not start without them.
-      jwk-set-uri: ${FRAUD_JWKS_URI}
-      issuer: ${FRAUD_JWT_ISSUER}
-      audience: ${FRAUD_JWT_AUDIENCE:fraud-detection-service}
-    # Required. Base64 of at least 32 random bytes. Supplied via the secret store.
-    card-token-key: ${FRAUD_CARD_TOKEN_KEY}
-
   risk:
     amount-base-limits:
       EUR: 10000.00

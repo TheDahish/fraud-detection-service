@@ -6,10 +6,10 @@
         logger, appender, or call site cannot bypass it. %msg and %ex are replaced; %m is aliased in case
         a pattern uses it.
     -->
-    <conversionRule conversionWord="msg" converterClass="com.example.frauddetectionservice.infrastructure.logging.MaskingMessageConverter"/>
-    <conversionRule conversionWord="m" converterClass="com.example.frauddetectionservice.infrastructure.logging.MaskingMessageConverter"/>
-    <conversionRule conversionWord="ex" converterClass="com.example.frauddetectionservice.infrastructure.logging.MaskingThrowableConverter"/>
-    <conversionRule conversionWord="throwable" converterClass="com.example.frauddetectionservice.infrastructure.logging.MaskingThrowableConverter"/>
+    <conversionRule conversionWord="msg" converterClass="com.example.frauddetectionservice.util.MaskingMessageConverter"/>
+    <conversionRule conversionWord="m" converterClass="com.example.frauddetectionservice.util.MaskingMessageConverter"/>
+    <conversionRule conversionWord="ex" converterClass="com.example.frauddetectionservice.util.MaskingThrowableConverter"/>
+    <conversionRule conversionWord="throwable" converterClass="com.example.frauddetectionservice.util.MaskingThrowableConverter"/>
 
     <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
         <encoder>

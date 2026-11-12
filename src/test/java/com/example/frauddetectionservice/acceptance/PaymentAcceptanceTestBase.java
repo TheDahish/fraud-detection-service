@@ -1,37 +1,32 @@
 package com.example.frauddetectionservice.acceptance;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
-import org.springframework.http.MediaType;
 
 import java.util.UUID;
 
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 
 /**
  * Shared setup for acceptance tests. They talk to the service only through HTTP, the way a payment
  * processor would. The one exception is onboarding a terminal, which needs the terminal registry
  * to hold it; each test creates its own terminal so tests cannot influence each other's history.
  */
-@SpringBootTest(properties = {
-        "fraud.security.jwt.jwk-set-uri=http://127.0.0.1:9/unused-in-tests",
-        "fraud.security.jwt.issuer=https://issuer.test",
-        "fraud.security.jwt.audience=fraud-detection-service",
-        "fraud.security.card-token-key=MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
-})
+@SpringBootTest
 @AutoConfigureMockMvc
 public abstract class PaymentAcceptanceTestBase {
 
     public static final String ENDPOINT = "/api/v1/fraud/assessments";
     public static final String VALID_CARD = "4111111111111111";
     public static final SimpleGrantedAuthority ASSESS_SCOPE = new SimpleGrantedAuthority("SCOPE_fraud:assess");
-    public static final SimpleGrantedAuthority OPS_SCOPE = new SimpleGrantedAuthority("SCOPE_ops:read");
+    public static final SimpleGrantedAuthority OTHER_SCOPE = new SimpleGrantedAuthority("SCOPE_reports:read");
 
     @Autowired
     protected MockMvc mvc;

@@ -139,7 +139,7 @@ components:
           description: True if the transaction must be blocked.
         rejectionMessage:
           type: ["string", "null"]
-          description: Human-readable reason when `rejected` is true. Null otherwise.
+          description: When `rejected` is true, names the single reason, or says the transaction was rejected for multiple causes listed in `triggeredRules`. Null otherwise.
         fraudScore:
           type: integer
           minimum: 0

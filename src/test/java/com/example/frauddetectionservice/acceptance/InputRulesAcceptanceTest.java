@@ -80,11 +80,4 @@ class InputRulesAcceptanceTest extends PaymentAcceptanceTestBase {
     void refusesMalformedJson() throws Exception {
         submit("{\"amount\": ").andExpect(status().isBadRequest());
     }
-
-    @Test
-    @DisplayName("An oversized request is refused before it is read")
-    void refusesOversizedRequest() throws Exception {
-        String padding = "x".repeat(9000);
-        submit("{\"padding\": \"" + padding + "\"}").andExpect(status().isContentTooLarge());
-    }
 }

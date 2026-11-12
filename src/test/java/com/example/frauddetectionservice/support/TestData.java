@@ -1,17 +1,14 @@
 package com.example.frauddetectionservice.support;
 
-import com.example.frauddetectionservice.domain.CardNumber;
-import com.example.frauddetectionservice.domain.RiskContext;
-import com.example.frauddetectionservice.domain.Terminal;
-import com.example.frauddetectionservice.domain.Transaction;
+import com.example.frauddetectionservice.model.Terminal;
+import com.example.frauddetectionservice.model.Transaction;
+import com.example.frauddetectionservice.rules.RiskContext;
 
 import java.math.BigDecimal;
 import java.util.Currency;
 import java.util.Optional;
 
 public final class TestData {
-
-    public static final String CARD = "4111111111111111";
 
     private TestData() {
     }
@@ -21,8 +18,7 @@ public final class TestData {
     }
 
     public static Transaction tx(String amount, String currency, String terminalId, int threat) {
-        return new Transaction(new BigDecimal(amount), Currency.getInstance(currency), terminalId, threat,
-                CardNumber.of(CARD));
+        return new Transaction(new BigDecimal(amount), Currency.getInstance(currency), terminalId, threat);
     }
 
     public static Terminal active(String id) {

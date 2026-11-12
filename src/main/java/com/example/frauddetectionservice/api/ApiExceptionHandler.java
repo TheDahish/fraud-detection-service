@@ -1,8 +1,8 @@
 package com.example.frauddetectionservice.api;
 
-import com.example.frauddetectionservice.application.UnsupportedCurrencyException;
-import com.example.frauddetectionservice.domain.InvalidAmountException;
-import com.example.frauddetectionservice.domain.InvalidCardNumberException;
+import com.example.frauddetectionservice.exception.InvalidAmountException;
+import com.example.frauddetectionservice.exception.InvalidCardNumberException;
+import com.example.frauddetectionservice.exception.UnsupportedCurrencyException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;

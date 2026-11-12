@@ -6,14 +6,13 @@ CREATE TABLE terminal (
     CONSTRAINT ck_terminal_status CHECK (status IN ('ACTIVE', 'BLOCKED'))
 );
 
--- Append-only assessment audit. Stores a keyed card token, never the PAN.
+-- Append-only assessment audit. Holds no card data.
 CREATE TABLE fraud_assessment (
     id                    UUID          PRIMARY KEY,
     terminal_id           VARCHAR(32)   NOT NULL,
     amount                DECIMAL(19,4) NOT NULL,
     currency              VARCHAR(3)    NOT NULL,
     terminal_threat_score INTEGER       NOT NULL,
-    card_token            VARCHAR(64)   NOT NULL,
     rejected              BOOLEAN       NOT NULL,
     fraud_score           INTEGER       NOT NULL,
     assessed_at           TIMESTAMP WITH TIME ZONE NOT NULL,

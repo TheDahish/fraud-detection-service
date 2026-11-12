@@ -1,12 +1,12 @@
 package com.example.frauddetectionservice.api;
 
-import com.example.frauddetectionservice.application.UnsupportedCurrencyException;
-import com.example.frauddetectionservice.domain.Assessment;
-import com.example.frauddetectionservice.domain.CardNumber;
-import com.example.frauddetectionservice.domain.Transaction;
+import com.example.frauddetectionservice.exception.UnsupportedCurrencyException;
 import com.example.frauddetectionservice.generated.model.FraudAssessmentRequest;
 import com.example.frauddetectionservice.generated.model.FraudAssessmentResponse;
 import com.example.frauddetectionservice.generated.model.TriggeredRule;
+import com.example.frauddetectionservice.model.Assessment;
+import com.example.frauddetectionservice.model.Transaction;
+import com.example.frauddetectionservice.util.CardNumberValidator;
 import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
@@ -19,12 +19,12 @@ import java.util.List;
 class AssessmentMapper {
 
     Transaction toDomain(FraudAssessmentRequest request) {
+        CardNumberValidator.requireValid(request.getCardNumber());
         return new Transaction(
                 request.getAmount(),
                 parseCurrency(request.getCurrency()),
                 request.getTerminalId(),
-                request.getTerminalThreatScore(),
-                CardNumber.of(request.getCardNumber()));
+                request.getTerminalThreatScore());
     }
 
     FraudAssessmentResponse toResponse(Assessment assessment) {
