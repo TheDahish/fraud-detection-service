@@ -59,6 +59,15 @@ public abstract class PaymentAcceptanceTestBase {
         return payment(terminalId, amount, "EUR", threat, VALID_CARD);
     }
 
+    /** Submits a payment with an Idempotency-Key header. */
+    protected ResultActions submitWithKey(String body, String idempotencyKey) throws Exception {
+        return mvc.perform(post(ENDPOINT)
+                .with(jwt().authorities(ASSESS_SCOPE))
+                .header("Idempotency-Key", idempotencyKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body));
+    }
+
     /** Submits a payment as a caller holding the payment scope. */
     protected ResultActions submit(String body) throws Exception {
         return mvc.perform(post(ENDPOINT)

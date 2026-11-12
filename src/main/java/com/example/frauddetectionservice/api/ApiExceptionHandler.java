@@ -2,7 +2,10 @@ package com.example.frauddetectionservice.api;
 
 import com.example.frauddetectionservice.exception.InvalidAmountException;
 import com.example.frauddetectionservice.exception.InvalidCardNumberException;
+import com.example.frauddetectionservice.exception.DuplicateAssessmentException;
+import com.example.frauddetectionservice.exception.IdempotencyKeyReusedException;
 import com.example.frauddetectionservice.exception.UnsupportedCurrencyException;
+import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -82,6 +85,28 @@ class ApiExceptionHandler {
         log.error("assessment transaction failed cause={}", ex.getMostSpecificCause().getClass().getName());
         return respond(problem(HttpStatus.SERVICE_UNAVAILABLE, "Service unavailable",
                 "Fraud assessment is temporarily unavailable"));
+    }
+
+    @ExceptionHandler(ConstraintViolationException.class)
+    ResponseEntity<ProblemDetail> handleConstraintViolation(ConstraintViolationException ex) {
+        // Only the Idempotency-Key pattern is validated at method level. The message names the rule, not the value.
+        log.debug("method-level validation failed");
+        return respond(problem(HttpStatus.BAD_REQUEST, "Invalid Idempotency-Key",
+                "Idempotency-Key must be 8 to 64 letters, digits, dots, underscores or hyphens"));
+    }
+
+    @ExceptionHandler(IdempotencyKeyReusedException.class)
+    ResponseEntity<ProblemDetail> handleKeyReused(IdempotencyKeyReusedException ex) {
+        log.debug("idempotency key reused for a different payment");
+        return respond(problem(HttpStatus.UNPROCESSABLE_ENTITY, "Idempotency-Key reused",
+                "This Idempotency-Key was already used for a different payment"));
+    }
+
+    @ExceptionHandler(DuplicateAssessmentException.class)
+    ResponseEntity<ProblemDetail> handleDuplicate(DuplicateAssessmentException ex) {
+        log.debug("duplicate request refused by idempotency key");
+        return respond(problem(HttpStatus.CONFLICT, "Duplicate request",
+                "This Idempotency-Key was already used for an earlier assessment"));
     }
 
     @ExceptionHandler(InvalidAmountException.class)

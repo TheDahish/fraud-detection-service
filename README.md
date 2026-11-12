@@ -86,7 +86,7 @@ Or in the Bruno app: select the `local` environment and run the collection. Its 
 - **Unit tests** cover each rule's boundaries, the engine's critical short-circuit, weighting and rounding, value objects and the log masker.
 - **Acceptance tests** ([src/test/.../acceptance](src/test/java/com/example/frauddetectionservice/acceptance)) drive the HTTP API through the security layer and check the business rules: approvals, declines, input validation, access control, and card-data protection.
 
-`./mvnw verify` runs 85 tests: 84 pass and 1 is disabled on purpose. The disabled test checks that retried requests are not counted twice, and it needs the idempotency feature, which isn't built yet.
+`./mvnw verify` runs 92 tests, all passing. The idempotency tests check that a retry with the same `Idempotency-Key` is refused and not counted again.
 
 ## Security
 
@@ -100,6 +100,6 @@ Or in the Bruno app: select the `local` environment and run the collection. Its 
 
 - **Token verification is mocked.** The service accepts two fixed tokens and checks no signature, issuer or audience. Real JWT validation (JWK set, issuer, audience) must replace the mock before any production use. The mock tokens are in the code, so the mock must not reach a production profile.
 - **Single node.** The database is in-process H2, so each instance has its own velocity history. Horizontal scaling needs a shared PostgreSQL, as described in the design doc.
-- **No idempotency.** A retried request is counted twice.
+- **Idempotency is key-only.** A retry with the same `Idempotency-Key` gets 409 and no decision, so the client cannot get the original decision back. A key reused for a different payment gets 422. The payment fingerprint leaves out the card number, so a key reused with only a different card is not detected.
 - **Caller identity isn't recorded** in the audit trail.
 - **Card and geo-location rules** aren't implemented.

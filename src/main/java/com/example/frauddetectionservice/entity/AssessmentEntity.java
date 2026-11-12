@@ -16,7 +16,11 @@ import java.util.UUID;
 
 /**
  * Append-only audit row of one assessment. Holds no card data.
- * Implements {@link Persistable} so Spring Data issues an INSERT for assigned IDs instead of a SELECT-then-merge.
+ *
+ * <p>Rows from requests with an Idempotency-Key store the key and a fingerprint of the payment, so a retry
+ * can be told apart from a key reused for a different payment.
+ *
+ * <p>Implements {@link Persistable} so Spring Data issues an INSERT for assigned IDs instead of a SELECT-then-merge.
  */
 @Entity
 @Table(name = "fraud_assessment")
@@ -47,6 +51,12 @@ public class AssessmentEntity implements Persistable<UUID> {
     @Column(name = "assessed_at", nullable = false)
     private Instant assessedAt;
 
+    @Column(name = "idempotency_key", length = 64)
+    private String idempotencyKey;
+
+    @Column(name = "request_fingerprint", length = 64)
+    private String requestFingerprint;
+
     @Transient
     private boolean newEntity = true;
 
@@ -54,8 +64,10 @@ public class AssessmentEntity implements Persistable<UUID> {
         // required by JPA
     }
 
+    /** Pass null for idempotencyKey and requestFingerprint when the request had no Idempotency-Key. */
     public AssessmentEntity(UUID id, String terminalId, BigDecimal amount, Currency currency,
-                            int terminalThreatScore, boolean rejected, int fraudScore, Instant assessedAt) {
+                            int terminalThreatScore, boolean rejected, int fraudScore, Instant assessedAt,
+                            String idempotencyKey, String requestFingerprint) {
         this.id = id;
         this.terminalId = terminalId;
         this.amount = amount;
@@ -64,6 +76,12 @@ public class AssessmentEntity implements Persistable<UUID> {
         this.rejected = rejected;
         this.fraudScore = fraudScore;
         this.assessedAt = assessedAt;
+        this.idempotencyKey = idempotencyKey;
+        this.requestFingerprint = requestFingerprint;
+    }
+
+    public String getRequestFingerprint() {
+        return requestFingerprint;
     }
 
     @Override

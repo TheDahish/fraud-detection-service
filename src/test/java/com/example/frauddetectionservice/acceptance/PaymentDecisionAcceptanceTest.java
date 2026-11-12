@@ -1,7 +1,6 @@
 package com.example.frauddetectionservice.acceptance;
 
 import com.jayway.jsonpath.JsonPath;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MvcResult;
@@ -115,22 +114,48 @@ class PaymentDecisionAcceptanceTest extends PaymentAcceptanceTestBase {
     }
 
     @Test
-    @Disabled("Business requirement not yet built: a retry of the same payment must not be counted twice")
-    @DisplayName("Retrying the same payment with the same key returns the same decision and is not counted twice")
+    @DisplayName("A retry with the same Idempotency-Key is refused as a duplicate and is not counted again")
     void retriedPaymentIsNotCountedTwice() throws Exception {
         String terminal = activeTerminal();
         String body = payment(terminal, "25.00", 0);
 
-        String first = submit(body).andReturn().getResponse().getContentAsString();
-        String retry = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(ENDPOINT)
-                        .with(org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors
-                                .jwt().authorities(ASSESS_SCOPE))
-                        .header("Idempotency-Key", "retry-1")
-                        .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
-                        .content(body))
-                .andReturn().getResponse().getContentAsString();
+        submitWithKey(body, "retry-key-001").andExpect(status().isOk());
+        submitWithKey(body, "retry-key-001").andExpect(status().isConflict());
 
-        assertThat(retry).isEqualTo(first);
+        Long recorded = jdbc.queryForObject(
+                "select count(*) from fraud_assessment where terminal_id = ?", Long.class, terminal);
+        assertThat(recorded).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("An Idempotency-Key reused for a different payment is refused with 422 and recorded nothing")
+    void keyReusedForADifferentPaymentIsRefused() throws Exception {
+        String terminal = activeTerminal();
+        submitWithKey(payment(terminal, "25.00", 0), "reuse-key-001").andExpect(status().isOk());
+        submitWithKey(payment(terminal, "26.00", 0), "reuse-key-001").andExpect(status().isUnprocessableEntity());
+
+        Long recorded = jdbc.queryForObject(
+                "select count(*) from fraud_assessment where terminal_id = ?", Long.class, terminal);
+        assertThat(recorded).isEqualTo(1L);
+    }
+
+    @Test
+    @DisplayName("A malformed Idempotency-Key is refused with 400")
+    void malformedKeyIsRefused() throws Exception {
+        submitWithKey(payment(activeTerminal(), "25.00", 0), "bad key!").andExpect(status().isBadRequest());
+    }
+
+    @Test
+    @DisplayName("Without a key, an identical repeat is assessed again and counted as a new attempt")
+    void requestWithoutKeyIsNotRefused() throws Exception {
+        String terminal = activeTerminal();
+        String body = payment(terminal, "25.00", 0);
+        submit(body).andExpect(status().isOk());
+        submit(body).andExpect(status().isOk());
+
+        Long recorded = jdbc.queryForObject(
+                "select count(*) from fraud_assessment where terminal_id = ?", Long.class, terminal);
+        assertThat(recorded).isEqualTo(2L);
     }
 
     // --- helpers -----------------------------------------------------------------------------

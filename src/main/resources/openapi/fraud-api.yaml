@@ -22,6 +22,16 @@ paths:
       summary: Assess an in-flight transaction
       security:
         - bearerAuth: [fraud:assess]
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: >-
+            Optional. A request whose key was already used on the same terminal is refused and is not assessed or
+            counted again: 409 for the same payment, 422 for a different payment.
+          schema:
+            type: string
+            pattern: '^[A-Za-z0-9._-]{8,64}$'
       requestBody:
         required: true
         content:
@@ -41,6 +51,8 @@ paths:
           $ref: '#/components/responses/Unauthorized'
         '403':
           $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
         '422':
           $ref: '#/components/responses/UnprocessableEntity'
         '503':
@@ -75,8 +87,14 @@ components:
         application/problem+json:
           schema:
             $ref: '#/components/schemas/ApiProblem'
+    Conflict:
+      description: The Idempotency-Key was already used on this terminal. The earlier assessment stands.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ApiProblem'
     UnprocessableEntity:
-      description: The request is well-formed but references an unsupported currency.
+      description: The request is well-formed but references an unsupported currency, or an Idempotency-Key used for a different payment.
       content:
         application/problem+json:
           schema:

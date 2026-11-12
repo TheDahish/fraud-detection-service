@@ -3,6 +3,8 @@ package com.example.frauddetectionservice.service;
 import com.example.frauddetectionservice.config.RiskProperties;
 import com.example.frauddetectionservice.entity.AssessmentEntity;
 import com.example.frauddetectionservice.entity.TerminalEntity;
+import com.example.frauddetectionservice.exception.DuplicateAssessmentException;
+import com.example.frauddetectionservice.exception.IdempotencyKeyReusedException;
 import com.example.frauddetectionservice.exception.UnsupportedCurrencyException;
 import com.example.frauddetectionservice.model.Assessment;
 import com.example.frauddetectionservice.model.Terminal;
@@ -16,6 +18,7 @@ import com.example.frauddetectionservice.rules.TerminalVelocityWindowRule;
 import com.example.frauddetectionservice.rules.UnknownTerminalRule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
 import java.math.BigDecimal;
@@ -36,6 +39,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -79,7 +83,7 @@ class FraudAssessmentServiceTest {
 
     @Test
     void unsupportedCurrencyIsRejectedBeforeAnyStorageAccess() {
-        assertThatThrownBy(() -> service.assess(tx("10", "JPY", "T-1001", 0)))
+        assertThatThrownBy(() -> service.assess(tx("10", "JPY", "T-1001", 0), null))
                 .isInstanceOf(UnsupportedCurrencyException.class);
         verifyNoInteractions(terminals, assessments);
     }
@@ -89,7 +93,7 @@ class FraudAssessmentServiceTest {
         when(terminals.findByTerminalId("T-1001")).thenReturn(Optional.of(new TerminalEntity("T-1001", Terminal.Status.ACTIVE)));
         when(assessments.countByTerminalSince(anyString(), any())).thenReturn(3L);
 
-        service.assess(tx("10", 0));
+        service.assess(tx("10", 0), null);
 
         InOrder order = inOrder(terminals, assessments);
         order.verify(terminals).findByTerminalId("T-1001");
@@ -101,7 +105,7 @@ class FraudAssessmentServiceTest {
         when(terminals.findByTerminalId("T-1001")).thenReturn(Optional.of(new TerminalEntity("T-1001", Terminal.Status.ACTIVE)));
         when(assessments.countByTerminalSince(anyString(), any())).thenReturn(0L);
 
-        service.assess(tx("10", 0));
+        service.assess(tx("10", 0), null);
 
         verify(assessments).save(any(AssessmentEntity.class));
     }
@@ -111,7 +115,7 @@ class FraudAssessmentServiceTest {
         when(terminals.findByTerminalId("T-9999")).thenReturn(Optional.empty());
         when(assessments.countByTerminalSince(anyString(), any())).thenReturn(0L);
 
-        Assessment result = service.assess(tx("10", "EUR", "T-9999", 0));
+        Assessment result = service.assess(tx("10", "EUR", "T-9999", 0), null);
 
         assertThat(result.rejected()).isTrue();
         assertThat(result.fraudScore()).isEqualTo(80);
@@ -123,7 +127,59 @@ class FraudAssessmentServiceTest {
         when(terminals.findByTerminalId(eq("T-1001"))).thenReturn(Optional.of(new TerminalEntity("T-1001", Terminal.Status.ACTIVE)));
         when(assessments.countByTerminalSince(anyString(), any())).thenThrow(new IllegalStateException("db down"));
 
-        assertThatThrownBy(() -> service.assess(tx("10", 0))).isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> service.assess(tx("10", 0), null)).isInstanceOf(IllegalStateException.class);
         verify(assessments, never()).save(any());
+    }
+
+    @Test
+    void requestWithoutKeyNeverChecksForAKey() {
+        when(terminals.findByTerminalId("T-1001")).thenReturn(Optional.of(new TerminalEntity("T-1001", Terminal.Status.ACTIVE)));
+        when(assessments.countByTerminalSince(anyString(), any())).thenReturn(0L);
+
+        service.assess(tx("10", 0), null);
+
+        verify(assessments, never()).findByTerminalIdAndIdempotencyKey(any(), any());
+    }
+
+    @Test
+    void firstRequestWithAKeyIsAssessedAndRecordedWithThatKey() {
+        when(terminals.findByTerminalId("T-9999")).thenReturn(Optional.empty());
+        when(assessments.findByTerminalIdAndIdempotencyKey("T-9999", "key-0001")).thenReturn(Optional.empty());
+        when(assessments.countByTerminalSince(anyString(), any())).thenReturn(0L);
+
+        Assessment result = service.assess(tx("25", "EUR", "T-9999", 0), "key-0001");
+
+        assertThat(result.rejected()).isTrue();
+        verify(assessments).save(any(AssessmentEntity.class));
+    }
+
+    @Test
+    void retryOfTheSamePaymentIsRefusedAsADuplicateAndNotRecordedAgain() {
+        when(terminals.findByTerminalId("T-9999")).thenReturn(Optional.empty());
+        when(assessments.countByTerminalSince(anyString(), any())).thenReturn(0L);
+        service.assess(tx("25", "EUR", "T-9999", 0), "key-0002");
+
+        ArgumentCaptor<AssessmentEntity> saved = ArgumentCaptor.forClass(AssessmentEntity.class);
+        verify(assessments).save(saved.capture());
+        when(assessments.findByTerminalIdAndIdempotencyKey("T-9999", "key-0002")).thenReturn(Optional.of(saved.getValue()));
+
+        assertThatThrownBy(() -> service.assess(tx("25", "EUR", "T-9999", 0), "key-0002"))
+                .isInstanceOf(DuplicateAssessmentException.class);
+        verify(assessments, times(1)).save(any(AssessmentEntity.class));
+    }
+
+    @Test
+    void keyReusedForADifferentPaymentIsRefusedAndNotRecorded() {
+        when(terminals.findByTerminalId("T-9999")).thenReturn(Optional.empty());
+        when(assessments.countByTerminalSince(anyString(), any())).thenReturn(0L);
+        service.assess(tx("25", "EUR", "T-9999", 0), "key-0003");
+
+        ArgumentCaptor<AssessmentEntity> saved = ArgumentCaptor.forClass(AssessmentEntity.class);
+        verify(assessments).save(saved.capture());
+        when(assessments.findByTerminalIdAndIdempotencyKey("T-9999", "key-0003")).thenReturn(Optional.of(saved.getValue()));
+
+        assertThatThrownBy(() -> service.assess(tx("26", "EUR", "T-9999", 0), "key-0003"))
+                .isInstanceOf(IdempotencyKeyReusedException.class);
+        verify(assessments, times(1)).save(any(AssessmentEntity.class));
     }
 }

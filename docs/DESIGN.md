@@ -7,7 +7,7 @@ Status: implemented, pending owner review. Companion to `DESIGN_PLAN.md`, which 
 - One real-time endpoint: `POST /api/v1/fraud/assessments`. Input: amount, currency, terminal ID, terminal threat score (0-100), card number. Output: rejection status, rejection message, fraud score (0-100), and the triggered rules.
 - Rules implemented: amount vs. threat score, unknown terminal, terminal velocity in a window, terminal velocity vs. threat score.
 - Out of scope by instruction: card usage frequency and card + geo-location. The listed inputs also contain no location data, so the geo rule cannot be computed from them.
-- Tests: 85 automated tests (unit and acceptance) run with `./mvnw verify`: 84 pass and 1 is disabled on purpose (idempotency, section 6). Verification against a running instance is described in section 10.
+- Tests: 92 automated tests (unit and acceptance) run with `./mvnw verify`, all passing. Verification against a running instance is described in section 10.
 
 ## 2. Architecture
 
@@ -120,7 +120,7 @@ Verified: no token gives 401; an unknown token gives 401; a valid token without 
 - **Timeouts everywhere:** connection acquisition 1 s, query 2 s, row lock 2 s. A slow dependency fails fast rather than tying up threads.
 - **Failure policy: fail closed.** When the database is unavailable (including lock timeouts, query timeouts and commit-time failures), the endpoint returns 503 and the transaction is not assessed. The caller decides whether to retry or decline. The alternative, fail open, protects revenue but accepts fraud risk. This is a business decision, so the service does not choose silently: the caller owns the policy and the 503 makes the outcome explicit.
 - **No in-process fallback** for the rules. A rule that depends on state cannot be evaluated without that state, so guessing a result would be worse than failing.
-- **Idempotency gap.** A retried request is counted twice in velocity, which can cause a false rejection after a network timeout. The brief defines no transaction ID. Recommended next step: an optional `transactionId` with a unique constraint, so retries return the original decision.
+- **Idempotency.** An optional `Idempotency-Key` header is stored with each assessment, together with a fingerprint of the payment (terminal, amount, currency, threat score; the card number is not stored, so it is not part of the fingerprint). A later request with the same key on the same terminal is refused and is not assessed or counted again: 409 for the same payment, 422 for a different payment. The retry gets no decision back. Returning the original decision would need the decision stored with the key.
 
 Not implemented, documented for production: a circuit breaker (Resilience4j) around the database, and a read replica or cache for the velocity count. Both add infrastructure with no benefit at this scale and no way to demonstrate them here.
 
@@ -177,7 +177,7 @@ Done against a running instance, with the mock token decoder (section 5). The au
 | Log sanitizer probe | All sensitive inputs masked, normal text unchanged |
 | Schema validation at startup | Passes (after one real `CHAR`/`VARCHAR` fix) |
 
-Automated suite: `./mvnw verify` runs 85 tests with 0 failures and 1 skipped (the idempotency test, disabled on purpose). It covers each rule's boundaries, the engine's critical short-circuit and weighting, value validation, the log masker, the service's locking order and failure behaviour, and the HTTP acceptance tests (decisions, input rules, access control, card-data protection).
+Automated suite: `./mvnw verify` runs 92 tests with 0 failures and 0 skipped. It covers each rule's boundaries, the engine's critical short-circuit and weighting, value validation, the log masker, the service's locking order and failure behaviour, and the HTTP acceptance tests (decisions, input rules, access control, card-data protection).
 
 Not verified in this iteration:
 - The 503 path under a real database outage (mapping is in place, not exercised).
@@ -188,7 +188,7 @@ Not verified in this iteration:
 ## 11. Open decisions for the owner
 
 1. **Failure policy:** keep fail-closed (503) as the default, or move to fail-open with a stricter local limit?
-2. **Idempotency:** add a `transactionId` to the request?
+2. **Idempotency:** the current key-only design refuses retries with 409 and returns no decision. Should a retry get the original decision back? That needs the decision stored with the key.
 3. **Geo rule:** add IP or location input, or keep it documented as a gap?
 4. **Currency:** per-currency limits (current) or FX conversion to a base currency?
 5. **Weights and thresholds:** the current values (0.4 / 0.8 / 0.4 / 0.4, reject at 70) are defensible but untuned. They need calibration against real data.
@@ -210,7 +210,7 @@ An independent review was run against the code. Each finding was checked and han
 
 **Accepted and documented, not fixed in this iteration**
 - *Single-node persistence (High).* See section 6. Production needs shared PostgreSQL before any HA claim holds.
-- *Idempotency (High).* A lost response followed by a retry double-counts velocity. The planned fix is an `Idempotency-Key` header with a unique constraint on (terminal, key).
+- *Idempotency (Medium).* An optional `Idempotency-Key` stops a retry from being counted again. A retry gets 409 and no decision back. A key reused for a different payment gets 422. The fingerprint excludes the card number, so a key reused with only a different card is not detected. See section 6.
 - *Unregistered terminals take no lock (Medium).* The unknown-terminal weight (0.8) rejects alone, so the race has no effect today. It would matter if that weight were lowered below 0.7. The fix is an advisory lock keyed on the terminal ID.
 - *Generated DTO `toString` prints the PAN (Medium).* The application never logs request DTOs, and the masking layer would catch a PAN in a logged string. The generator template should be customised so the DTO cannot print it.
 - *401 and 403 bodies are empty, not problem+json (Medium).* Custom Spring Security entry points are needed.

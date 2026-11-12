@@ -7,6 +7,7 @@ import com.example.frauddetectionservice.model.Assessment;
 import com.example.frauddetectionservice.model.Transaction;
 import com.example.frauddetectionservice.service.FraudAssessmentService;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -14,6 +15,7 @@ import org.springframework.web.bind.annotation.RestController;
  * It does not log request bodies, because they contain card numbers.
  */
 @RestController
+@Validated
 public class AssessmentController implements FraudAssessmentApi {
 
     private final FraudAssessmentService service;
@@ -25,9 +27,11 @@ public class AssessmentController implements FraudAssessmentApi {
     }
 
     @Override
-    public ResponseEntity<FraudAssessmentResponse> assessTransaction(FraudAssessmentRequest fraudAssessmentRequest) {
+    public ResponseEntity<FraudAssessmentResponse> assessTransaction(
+            FraudAssessmentRequest fraudAssessmentRequest,
+            String idempotencyKey) {
         Transaction transaction = mapper.toDomain(fraudAssessmentRequest);
-        Assessment assessment = service.assess(transaction);
+        Assessment assessment = service.assess(transaction, idempotencyKey);
         return ResponseEntity.ok(mapper.toResponse(assessment));
     }
 }
